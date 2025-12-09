@@ -18,6 +18,10 @@ services:
       dockerfile: Dockerfile.mcp
     env_file:
       - .env
+    environment:
+      - MCP_TRANSPORT=${MCP_TRANSPORT:-sse}
+      - MCP_PORT=${MCP_PORT:-8000}
+      - MCP_HOST=${MCP_HOST:-0.0.0.0}
     depends_on:
       - perplexica
     ports:

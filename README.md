@@ -127,13 +127,27 @@ If you prefer to build from source or need more control:
 
 **Note**: After the containers are built, you can start Perplexica directly from Docker without having to open a terminal.
 
-### MCP search wrapper (docker-compose)
+### MCP (Model Context Protocol) Integration
 
-1. `cp .env.template .env` and set `OPENAI_API_KEY` plus `MCP_LLM_MODEL` / `MCP_EMBED_MODEL` as needed.
-2. Run `docker compose up --build mcp-search perplexica` to start Perplexica and the MCP wrapper together.
-3. Call `POST http://localhost:8000/tools/perplexica_search` with JSON like `{ "query": "hello world" }` (optional: `focusMode`, `optimizationMode`, `history`).
-4. `PERPLEXICA_API_URL` in `.env` points the MCP service at Perplexica (defaults to `http://perplexica:3000` inside docker-compose).
-5. Подробнее про настройки и примеры запросов см. `docs/mcp.md` (включая пример для Claude/Anthropic: `OPENAI_BASE_URL=https://api.anthropic.com/v1`, `MCP_PROVIDER_NAME=Anthropic`, `MCP_LLM_MODEL=claude-3-5-sonnet-20241022`, эмбеддинги через `Transformers` — `Xenova/all-MiniLM-L6-v2`).
+Perplexica предоставляет MCP сервер для интеграции с агентами, поддерживающими Model Context Protocol (Claude Desktop, Cursor и др.).
+
+**Быстрый старт:**
+
+1. Соберите MCP сервер: `cd mcp-server && npm install && npm run build`
+2. Запустите Perplexica: `docker compose up -d perplexica`
+3. Настройте переменные окружения (см. `docs/mcp.md`)
+4. Добавьте конфигурацию в Claude Desktop (см. `docs/mcp.md`)
+
+**Подробная документация:** См. [`docs/mcp.md`](docs/mcp.md) для полных инструкций по:
+- Подключению к Claude Desktop (локальный режим через stdio)
+- Удаленному доступу через SSE (для серверных развертываний)
+- Настройке провайдеров (OpenAI, Anthropic, локальные модели)
+- Тестированию MCP сервера
+- Устранению неполадок
+
+**Режимы работы:**
+- `stdio` — для локального использования с Claude Desktop
+- `sse` — для удаленного доступа по HTTP (запуск: `MCP_TRANSPORT=sse docker compose up -d mcp-search`)
 
 ### Non-Docker Installation
 

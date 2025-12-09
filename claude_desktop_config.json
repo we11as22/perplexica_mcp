@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "perplexica-search": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "npm",
+        "start"
+      ],
+      "cwd": "/Users/a.sudakov/Desktop/code/my_projects/helpfull_mcp/perplexica_mcp/mcp-server",
+      "env": {
+        "PERPLEXICA_API_URL": "http://localhost:3000",
+        "MCP_PROVIDER_NAME": "OpenAI",
+        "MCP_EMBED_PROVIDER_NAME": "Transformers",
+        "MCP_LLM_MODEL": "qwen-3-32b",
+        "MCP_EMBED_MODEL": "Xenova/all-MiniLM-L6-v2",
+        "MCP_FOCUS_MODE": "webSearch",
+        "MCP_OPTIMIZATION_MODE": "speed",
+        "MCP_SYSTEM_INSTRUCTIONS": ""
+      }
+    }
+  }
+}
