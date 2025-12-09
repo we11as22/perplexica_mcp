@@ -74,7 +74,7 @@ async function listTools() {
       {
         name: 'perplexica_search',
         description:
-          'Performs intelligent web search using Perplexica AI search engine. Combines results from multiple search engines (Google, Bing, DuckDuckGo, etc.) and uses AI to synthesize comprehensive, well-cited answers. Returns detailed responses with source citations. Supports different search modes: general web search, academic papers, writing assistance, Wolfram Alpha calculations, YouTube videos, and Reddit discussions.',
+          'Performs intelligent web search using Perplexica AI search engine. Combines results from multiple search engines (Google, Bing, DuckDuckGo, etc.) and uses AI to synthesize comprehensive, well-cited answers. Returns detailed responses with source citations. Supports different search modes: general web search, academic papers, writing assistance, Wolfram Alpha calculations, YouTube videos, Reddit discussions, and Habr articles.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -91,9 +91,10 @@ async function listTools() {
                 'wolframAlphaSearch',
                 'youtubeSearch',
                 'redditSearch',
+                'habrSearch',
               ],
               description:
-                'Search focus mode: webSearch (default), academicSearch, writingAssistant, wolframAlphaSearch, youtubeSearch, or redditSearch',
+                'Search focus mode: webSearch (default), academicSearch, writingAssistant, wolframAlphaSearch, youtubeSearch, redditSearch, or habrSearch',
               default: 'webSearch',
             },
             optimizationMode: {
