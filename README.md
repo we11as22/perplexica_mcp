@@ -127,6 +127,14 @@ If you prefer to build from source or need more control:
 
 **Note**: After the containers are built, you can start Perplexica directly from Docker without having to open a terminal.
 
+### MCP search wrapper (docker-compose)
+
+1. `cp .env.template .env` and set `OPENAI_API_KEY` plus `MCP_LLM_MODEL` / `MCP_EMBED_MODEL` as needed.
+2. Run `docker compose up --build mcp-search perplexica` to start Perplexica and the MCP wrapper together.
+3. Call `POST http://localhost:8000/tools/perplexica_search` with JSON like `{ "query": "hello world" }` (optional: `focusMode`, `optimizationMode`, `history`).
+4. `PERPLEXICA_API_URL` in `.env` points the MCP service at Perplexica (defaults to `http://perplexica:3000` inside docker-compose).
+5. Подробнее про настройки и примеры запросов см. `docs/mcp.md` (включая пример для Claude/Anthropic: `OPENAI_BASE_URL=https://api.anthropic.com/v1`, `MCP_PROVIDER_NAME=Anthropic`, `MCP_LLM_MODEL=claude-3-5-sonnet-20241022`, эмбеддинги через `Transformers` — `Xenova/all-MiniLM-L6-v2`).
+
 ### Non-Docker Installation
 
 1. Install SearXNG and allow `JSON` format in the SearXNG settings. Make sure Wolfram Alpha search engine is also enabled.

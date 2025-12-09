@@ -1,11 +1,27 @@
 services:
   perplexica:
-    image: itzcrazykns1337/perplexica:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
     ports:
       - '3000:3000'
     volumes:
       - data:/home/perplexica/data
       - uploads:/home/perplexica/uploads
+    restart: unless-stopped
+
+  mcp-search:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+    env_file:
+      - .env
+    depends_on:
+      - perplexica
+    ports:
+      - '${MCP_PORT:-8000}:8000'
     restart: unless-stopped
 
 volumes:
