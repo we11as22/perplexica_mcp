@@ -141,8 +141,47 @@ async function listTools() {
                 'Example: [["human", "What is TypeScript?"], ["ai", "TypeScript is a typed superset of JavaScript..."], ["human", "How does it compare to JavaScript?"]]. ' +
                 'Roles are automatically normalized: "user"/"human" → "human", "assistant"/"ai" → "ai".',
             },
+            lastTwoMessages: {
+              type: 'array',
+              items: {
+                type: 'array',
+                items: [
+                  {
+                    type: 'string',
+                    enum: ['human', 'ai', 'user', 'assistant'],
+                    description:
+                      'Message role indicating who sent the message. Use "human" or "user" for user messages, "ai" or "assistant" for assistant responses.',
+                  },
+                  {
+                    type: 'string',
+                    description: 'The actual message content text.',
+                    minLength: 1,
+                  },
+                ],
+                minItems: 2,
+                maxItems: 2,
+                additionalItems: false,
+              },
+              minItems: 0,
+              maxItems: 2,
+              description:
+                'REQUIRED: Last 2 messages from the conversation context. Must be provided as array of [role, text] tuples. ' +
+                'These messages are used by LLM to generate multiple query reformulations. ' +
+                'If conversation has less than 2 messages, provide empty array or available messages. ' +
+                'Example: [["human", "What is TypeScript?"], ["ai", "TypeScript is a typed superset of JavaScript..."]]',
+            },
+            queryVariationsCount: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 5,
+              default: 1,
+              description:
+                'Number of query reformulations to generate. LLM will create multiple different phrasings and interpretations of the query. ' +
+                'Each reformulation will be searched in parallel, then results will be merged and reranked. ' +
+                'Default: 1 (no reformulation). Higher values (2-5) provide better coverage but slower performance.',
+            },
           },
-          required: ['query'],
+          required: ['query', 'lastTwoMessages'],
         },
       },
     ],
@@ -186,9 +225,33 @@ async function callTool(name: string, args: any) {
       })
     : [];
   
+  // Extract and normalize lastTwoMessages (required)
+  const lastTwoMessages: Array<[string, string]> = Array.isArray(args?.lastTwoMessages)
+    ? args.lastTwoMessages.map((item: [string, string]) => {
+        const role = item[0].toLowerCase();
+        const normalizedRole =
+          role === 'user' || role === 'human'
+            ? 'human'
+            : role === 'assistant' || role === 'ai'
+              ? 'ai'
+              : item[0];
+        return [normalizedRole, item[1]] as [string, string];
+      })
+    : [];
+
+  // Extract queryVariationsCount (optional, default 1)
+  const queryVariationsCount =
+    typeof args?.queryVariationsCount === 'number' &&
+    args.queryVariationsCount >= 1 &&
+    args.queryVariationsCount <= 5
+      ? args.queryVariationsCount
+      : 1;
+
   if (history.length > 0) {
     console.error(`[callTool] History normalized: ${history.length} messages`);
   }
+  console.error(`[callTool] Last two messages: ${lastTwoMessages.length} messages`);
+  console.error(`[callTool] Query variations count: ${queryVariationsCount}`);
 
   console.error(`[callTool] Fetching providers...`);
   try {
@@ -218,6 +281,8 @@ async function callTool(name: string, args: any) {
       },
       query,
       history,
+      lastTwoMessages,
+      queryVariationsCount,
       stream: false,
       systemInstructions: env.systemInstructions,
     };
@@ -268,6 +333,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request: any) => {
     focusMode?: string;
     optimizationMode?: string;
     history?: Array<[string, string]>;
+    lastTwoMessages?: Array<[string, string]>;
+    queryVariationsCount?: number;
   };
 
   const query = typeof args?.query === 'string' ? args.query.trim() : '';
@@ -300,6 +367,28 @@ server.setRequestHandler(CallToolRequestSchema, async (request: any) => {
       })
     : [];
 
+  // Extract and normalize lastTwoMessages (required)
+  const lastTwoMessages: Array<[string, string]> = Array.isArray(args?.lastTwoMessages)
+    ? args.lastTwoMessages.map((item: [string, string]) => {
+        const role = item[0].toLowerCase();
+        const normalizedRole =
+          role === 'user' || role === 'human'
+            ? 'human'
+            : role === 'assistant' || role === 'ai'
+              ? 'ai'
+              : item[0];
+        return [normalizedRole, item[1]] as [string, string];
+      })
+    : [];
+
+  // Extract queryVariationsCount (optional, default 1)
+  const queryVariationsCount =
+    typeof args?.queryVariationsCount === 'number' &&
+    args.queryVariationsCount >= 1 &&
+    args.queryVariationsCount <= 5
+      ? args.queryVariationsCount
+      : 1;
+
   try {
     const providers = await fetchProviders();
     const chatProvider = pickProvider(providers, env.providerName);
@@ -325,6 +414,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request: any) => {
       },
       query,
       history,
+      lastTwoMessages,
+      queryVariationsCount,
       stream: false,
       systemInstructions: env.systemInstructions,
     };

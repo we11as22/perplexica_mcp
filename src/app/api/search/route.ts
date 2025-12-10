@@ -11,6 +11,8 @@ interface ChatRequestBody {
   embeddingModel: ModelWithProvider;
   query: string;
   history: Array<[string, string]>;
+  lastTwoMessages?: Array<[string, string]>;
+  queryVariationsCount?: number;
   stream?: boolean;
   systemInstructions?: string;
 }
@@ -52,6 +54,22 @@ export const POST = async (req: Request) => {
       return Response.json({ message: 'Invalid focus mode' }, { status: 400 });
     }
 
+    // Extract last two messages from history if not provided
+    const lastTwoMessages =
+      body.lastTwoMessages ||
+      (body.history.length >= 2
+        ? body.history.slice(-2)
+        : body.history.length === 1
+          ? body.history
+          : []);
+
+    const queryVariationsCount =
+      typeof body.queryVariationsCount === 'number' &&
+      body.queryVariationsCount >= 1 &&
+      body.queryVariationsCount <= 5
+        ? body.queryVariationsCount
+        : 1;
+
     const emitter = await searchHandler.searchAndAnswer(
       body.query,
       history,
@@ -60,6 +78,8 @@ export const POST = async (req: Request) => {
       body.optimizationMode,
       [],
       body.systemInstructions || '',
+      lastTwoMessages,
+      queryVariationsCount,
     );
 
     if (!body.stream) {
