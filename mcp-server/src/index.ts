@@ -5,7 +5,7 @@ import {
   ListToolsRequestSchema,
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
-import express from 'express';
+import express, { Request, Response } from 'express';
 import { randomUUID } from 'crypto';
 
 type Provider = {
@@ -74,13 +74,15 @@ async function listTools() {
       {
         name: 'perplexica_search',
         description:
-          'Performs intelligent web search using Perplexica AI search engine. Combines results from multiple search engines (Google, Bing, DuckDuckGo, etc.) and uses AI to synthesize comprehensive, well-cited answers. Returns detailed responses with source citations. Supports different search modes: general web search, academic papers, writing assistance, Wolfram Alpha calculations, YouTube videos, Reddit discussions, and Habr articles.',
+          'Performs intelligent AI-powered web search using Perplexica. Aggregates results from multiple search engines (Google, Bing, DuckDuckGo, etc.) and uses AI to synthesize comprehensive, well-cited answers with source citations. Supports specialized search modes for different content types: general web, academic papers, writing assistance, mathematical calculations, video content, community discussions, and technical articles.',
         inputSchema: {
           type: 'object',
           properties: {
             query: {
               type: 'string',
-              description: 'The search query to execute',
+              description:
+                'The search query to execute. Can be a question, topic, or keywords. The AI will optimize the query and search across multiple sources to provide a comprehensive answer.',
+              minLength: 1,
             },
             focusMode: {
               type: 'string',
@@ -94,25 +96,50 @@ async function listTools() {
                 'habrSearch',
               ],
               description:
-                'Search focus mode: webSearch (default), academicSearch, writingAssistant, wolframAlphaSearch, youtubeSearch, redditSearch, or habrSearch',
+                'Search focus mode that determines which sources and algorithms are used:\n' +
+                '- webSearch: General web search across all search engines (default). Best for broad topics and current information.\n' +
+                '- academicSearch: Searches academic databases (arXiv, Google Scholar, PubMed). Best for research papers and scientific information.\n' +
+                '- writingAssistant: AI writing assistance without web search. Best for text generation, editing, and creative writing.\n' +
+                '- wolframAlphaSearch: Mathematical and computational queries via Wolfram Alpha. Best for calculations, formulas, and data analysis.\n' +
+                '- youtubeSearch: Video content search on YouTube. Best for tutorials, reviews, and video content.\n' +
+                '- redditSearch: Community discussions on Reddit. Best for opinions, experiences, and community insights.\n' +
+                '- habrSearch: Technical articles on Habr.com (Russian IT community). Best for programming, tech news, and IT discussions.',
               default: 'webSearch',
             },
             optimizationMode: {
               type: 'string',
               enum: ['balanced', 'speed'],
-              description: 'Optimization mode: balanced (default) or speed',
+              description:
+                'Optimization mode that balances speed vs accuracy:\n' +
+                '- balanced (default): Full semantic reranking of all results using embeddings. Slower but more accurate and relevant results.\n' +
+                '- speed: Minimal reranking, uses search engine order. Faster response time but lower semantic accuracy. Best for simple queries or when speed is critical.',
               default: 'balanced',
             },
             history: {
               type: 'array',
               items: {
                 type: 'array',
-                items: { type: 'string' },
+                items: [
+                  {
+                    type: 'string',
+                    enum: ['human', 'ai', 'user', 'assistant'],
+                    description:
+                      'Message role indicating who sent the message. Use "human" or "user" for user messages, "ai" or "assistant" for assistant responses.',
+                  },
+                  {
+                    type: 'string',
+                    description: 'The actual message content text.',
+                    minLength: 1,
+                  },
+                ],
                 minItems: 2,
                 maxItems: 2,
+                additionalItems: false,
               },
               description:
-                'Optional conversation history as array of [role, text] pairs',
+                'Optional conversation history as an array of [role, text] tuples. Provides context for follow-up questions and multi-turn conversations. ' +
+                'Example: [["human", "What is TypeScript?"], ["ai", "TypeScript is a typed superset of JavaScript..."], ["human", "How does it compare to JavaScript?"]]. ' +
+                'Roles are automatically normalized: "user"/"human" → "human", "assistant"/"ai" → "ai".',
             },
           },
           required: ['query'],
@@ -144,7 +171,24 @@ async function callTool(name: string, args: any) {
       ? args.optimizationMode
       : env.optimizationMode;
 
-  const history = Array.isArray(args?.history) ? args.history : [];
+  // Normalize history format (validation is done by JSON schema)
+  // Normalize role names: 'user' -> 'human', 'assistant' -> 'ai'
+  const history: Array<[string, string]> = Array.isArray(args?.history)
+    ? args.history.map((item: [string, string]) => {
+        const role = item[0].toLowerCase();
+        const normalizedRole =
+          role === 'user' || role === 'human'
+            ? 'human'
+            : role === 'assistant' || role === 'ai'
+              ? 'ai'
+              : item[0]; // Keep original if not recognized
+        return [normalizedRole, item[1]] as [string, string];
+      })
+    : [];
+  
+  if (history.length > 0) {
+    console.error(`[callTool] History normalized: ${history.length} messages`);
+  }
 
   console.error(`[callTool] Fetching providers...`);
   try {
@@ -214,7 +258,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   return await listTools();
 });
 
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
+server.setRequestHandler(CallToolRequestSchema, async (request: any) => {
   if (request.params.name !== 'perplexica_search') {
     throw new Error(`Unknown tool: ${request.params.name}`);
   }
@@ -242,7 +286,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       ? args.optimizationMode
       : env.optimizationMode;
 
-  const history = Array.isArray(args?.history) ? args.history : [];
+  // Normalize history format (validation is done by JSON schema)
+  const history: Array<[string, string]> = Array.isArray(args?.history)
+    ? args.history.map((item: [string, string]) => {
+        const role = item[0].toLowerCase();
+        const normalizedRole =
+          role === 'user' || role === 'human'
+            ? 'human'
+            : role === 'assistant' || role === 'ai'
+              ? 'ai'
+              : item[0]; // Keep original if not recognized
+        return [normalizedRole, item[1]] as [string, string];
+      })
+    : [];
 
   try {
     const providers = await fetchProviders();
@@ -315,7 +371,7 @@ async function runSSEServer() {
   app.use(express.json());
 
   // CORS middleware
-  app.use((req, res, next) => {
+  app.use((req: Request, res: Response, next: any) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.header('Access-Control-Allow-Headers', 'Content-Type');
@@ -327,7 +383,7 @@ async function runSSEServer() {
   });
 
   // SSE endpoint - creates new session
-  app.get('/sse', (req, res) => {
+  app.get('/sse', (req: Request, res: Response) => {
     const sessionId = req.query.session_id as string || randomUUID();
     const messagesPath = `/messages?session_id=${sessionId}`;
 
@@ -417,7 +473,7 @@ async function runSSEServer() {
   });
 
   // Messages endpoint - handles JSON-RPC requests
-  app.post('/messages', async (req, res) => {
+  app.post('/messages', async (req: Request, res: Response) => {
     let sessionId = req.query.session_id as string;
     
     // If no session_id provided, create a new one
