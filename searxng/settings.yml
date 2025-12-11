@@ -8,9 +8,22 @@ search:
   formats:
     - html
     - json
+  ban_time_on_fail: 10
+  max_ban_time_on_fail: 300
+  suspended_times:
+    SearxEngineTooManyRequests: 7200
+    SearxEngineCaptcha: 86400
 
 server:
-  secret_key: 'a2fb23f1b02e6ee83875b09826990de0f6bd908b6638e8c10277d415f6ab852b' # Is overwritten by ${SEARXNG_SECRET}
+  secret_key: 'a2fb23f1b02e6ee83875b09826990de0f6bd908b6638e8c10277d415f6ab852b'
+  port: 8080
+  bind_address: '0.0.0.0'
+
+outgoing:
+  pool_connections: 50
+  pool_maxsize: 10
+  request_timeout: 5.0
+  useragent_suffix: ' (compatible; +https://perplexica.com/bot)'
 
 engines:
   - name: wolframalpha
@@ -18,3 +31,9 @@ engines:
   - name: habrahabr
     disabled: false
     search_url: https://habr.com/ru/search/page{pageno}/?q={query}
+  - name: yandex
+    engine: yandex
+    categories: general
+    search_type: web
+    shortcut: yd
+    disabled: false

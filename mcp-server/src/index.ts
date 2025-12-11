@@ -141,51 +141,63 @@ async function listTools() {
                 'Example: [["human", "What is TypeScript?"], ["ai", "TypeScript is a typed superset of JavaScript..."], ["human", "How does it compare to JavaScript?"]]. ' +
                 'Roles are automatically normalized: "user"/"human" → "human", "assistant"/"ai" → "ai".',
             },
-            lastTwoMessages: {
+            queries: {
               type: 'array',
               items: {
-                type: 'array',
-                items: [
-                  {
-                    type: 'string',
-                    enum: ['human', 'ai', 'user', 'assistant'],
-                    description:
-                      'Message role indicating who sent the message. Use "human" or "user" for user messages, "ai" or "assistant" for assistant responses.',
-                  },
-                  {
-                    type: 'string',
-                    description: 'The actual message content text.',
-                    minLength: 1,
-                  },
-                ],
-                minItems: 2,
-                maxItems: 2,
-                additionalItems: false,
+                type: 'string',
+                minLength: 1,
+                description: 'A search query string. Each query in the array will be searched separately, with its own deduplication and reranking.',
               },
-              minItems: 0,
-              maxItems: 2,
+              minItems: 1,
               description:
-                'REQUIRED: Last 2 messages from the conversation context. Must be provided as array of [role, text] tuples. ' +
-                'These messages are used by LLM to generate multiple query reformulations. ' +
-                'If conversation has less than 2 messages, provide empty array or available messages. ' +
-                'Example: [["human", "What is TypeScript?"], ["ai", "TypeScript is a typed superset of JavaScript..."]]',
-            },
-            queryVariationsCount: {
-              type: 'integer',
-              minimum: 1,
-              maximum: 5,
-              default: 1,
-              description:
-                'Number of query reformulations to generate. LLM will create multiple different phrasings and interpretations of the query. ' +
-                'Each reformulation will be searched in parallel, then results will be merged and reranked. ' +
-                'Default: 1 (no reformulation). Higher values (2-5) provide better coverage but slower performance.',
+                'REQUIRED: Array of search queries to execute. The agent should provide all different phrasings, interpretations, and aspects of what needs to be found to answer the user\'s question. ' +
+                'Each query will be searched independently, with deduplication and reranking applied separately for each query\'s results. ' +
+                'Then all results will be combined and final deduplication will be applied across all queries. ' +
+                'Example: ["What is TypeScript?", "TypeScript vs JavaScript comparison", "TypeScript features and benefits"]. ' +
+                'The agent should think about all aspects of the question and provide comprehensive search queries to gather complete information.',
             },
           },
-          required: ['query', 'lastTwoMessages'],
+          required: ['query', 'queries'],
         },
       },
     ],
   };
+}
+
+/**
+ * Retry helper with exponential backoff
+ */
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  baseDelay: number = 1000,
+): Promise<T> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      lastError = error;
+      
+      // Don't retry on certain errors
+      if (error?.message?.includes('404') || error?.message?.includes('401') || error?.message?.includes('403')) {
+        throw error;
+      }
+      
+      // If this was the last attempt, throw the error
+      if (attempt === maxRetries) {
+        throw error;
+      }
+      
+      // Calculate delay with exponential backoff and jitter
+      const delay = baseDelay * Math.pow(2, attempt) + Math.random() * 1000;
+      console.error(`[callTool] Retry attempt ${attempt + 1}/${maxRetries} after ${Math.round(delay)}ms delay`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  
+  throw lastError || new Error('Unknown error in retry');
 }
 
 async function callTool(name: string, args: any) {
@@ -225,33 +237,25 @@ async function callTool(name: string, args: any) {
       })
     : [];
   
-  // Extract and normalize lastTwoMessages (required)
-  const lastTwoMessages: Array<[string, string]> = Array.isArray(args?.lastTwoMessages)
-    ? args.lastTwoMessages.map((item: [string, string]) => {
-        const role = item[0].toLowerCase();
-        const normalizedRole =
-          role === 'user' || role === 'human'
-            ? 'human'
-            : role === 'assistant' || role === 'ai'
-              ? 'ai'
-              : item[0];
-        return [normalizedRole, item[1]] as [string, string];
-      })
+  // Extract queries (required)
+  const queries: string[] = Array.isArray(args?.queries)
+    ? args.queries
+        .filter((q: any) => typeof q === 'string' && q.trim().length > 0)
+        .map((q: string) => q.trim())
     : [];
 
-  // Extract queryVariationsCount (optional, default 1)
-  const queryVariationsCount =
-    typeof args?.queryVariationsCount === 'number' &&
-    args.queryVariationsCount >= 1 &&
-    args.queryVariationsCount <= 5
-      ? args.queryVariationsCount
-      : 1;
+  if (queries.length === 0) {
+    // Fallback to single query if queries not provided
+    queries.push(query);
+  }
 
   if (history.length > 0) {
     console.error(`[callTool] History normalized: ${history.length} messages`);
   }
-  console.error(`[callTool] Last two messages: ${lastTwoMessages.length} messages`);
-  console.error(`[callTool] Query variations count: ${queryVariationsCount}`);
+  console.error(`[callTool] Queries to search: ${queries.length} queries`);
+  if (queries.length > 1) {
+    console.error(`[callTool] Query list: ${queries.join(', ')}`);
+  }
 
   console.error(`[callTool] Fetching providers...`);
   try {
@@ -281,28 +285,32 @@ async function callTool(name: string, args: any) {
       },
       query,
       history,
-      lastTwoMessages,
-      queryVariationsCount,
+      queries,
       stream: false,
       systemInstructions: env.systemInstructions,
     };
 
     console.error(`[callTool] Sending search request to ${searchUrl}`);
-    const searchResp = await fetch(searchUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(searchBody),
-    });
+    
+    // Retry API request with exponential backoff
+    const result = await retryWithBackoff(async () => {
+      const searchResp = await fetch(searchUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(searchBody),
+        signal: AbortSignal.timeout(180000), // 3 minute timeout
+      });
 
-    console.error(`[callTool] Search response status: ${searchResp.status}`);
-    if (!searchResp.ok) {
-      const text = await searchResp.text();
-      throw new Error(`Search failed (${searchResp.status}): ${text}`);
-    }
+      console.error(`[callTool] Search response status: ${searchResp.status}`);
+      if (!searchResp.ok) {
+        const text = await searchResp.text();
+        throw new Error(`Search failed (${searchResp.status}): ${text}`);
+      }
 
-    const result = await searchResp.json();
+      return await searchResp.json();
+    }, 3, 2000); // 3 retries, 2s base delay
     console.error(`[callTool] Search completed, result keys:`, Object.keys(result));
 
     return {
@@ -333,8 +341,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request: any) => {
     focusMode?: string;
     optimizationMode?: string;
     history?: Array<[string, string]>;
-    lastTwoMessages?: Array<[string, string]>;
-    queryVariationsCount?: number;
+    queries?: string[];
   };
 
   const query = typeof args?.query === 'string' ? args.query.trim() : '';
@@ -367,27 +374,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request: any) => {
       })
     : [];
 
-  // Extract and normalize lastTwoMessages (required)
-  const lastTwoMessages: Array<[string, string]> = Array.isArray(args?.lastTwoMessages)
-    ? args.lastTwoMessages.map((item: [string, string]) => {
-        const role = item[0].toLowerCase();
-        const normalizedRole =
-          role === 'user' || role === 'human'
-            ? 'human'
-            : role === 'assistant' || role === 'ai'
-              ? 'ai'
-              : item[0];
-        return [normalizedRole, item[1]] as [string, string];
-      })
+  // Extract queries (required)
+  const queries: string[] = Array.isArray(args?.queries)
+    ? args.queries
+        .filter((q: any) => typeof q === 'string' && q.trim().length > 0)
+        .map((q: string) => q.trim())
     : [];
 
-  // Extract queryVariationsCount (optional, default 1)
-  const queryVariationsCount =
-    typeof args?.queryVariationsCount === 'number' &&
-    args.queryVariationsCount >= 1 &&
-    args.queryVariationsCount <= 5
-      ? args.queryVariationsCount
-      : 1;
+  if (queries.length === 0) {
+    // Fallback to single query if queries not provided
+    queries.push(query);
+  }
 
   try {
     const providers = await fetchProviders();
@@ -414,8 +411,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request: any) => {
       },
       query,
       history,
-      lastTwoMessages,
-      queryVariationsCount,
+      queries,
       stream: false,
       systemInstructions: env.systemInstructions,
     };
@@ -613,6 +609,22 @@ async function runSSEServer() {
     // Process request through MCP server
     try {
       const request = req.body;
+      
+      // Check if this is a notification (no id field) - notifications don't require a response
+      const isNotification = request.id === undefined || request.id === null;
+      
+      if (isNotification) {
+        console.error(`[mcp-sse] Processing notification: ${request.method}`);
+        // Handle notifications
+        if (request.method === 'notifications/initialized') {
+          // Client initialized, no response needed
+          console.error(`[mcp-sse] Client initialized notification received`);
+          return; // Don't send response for notifications
+        }
+        // Other notifications can be handled here
+        return;
+      }
+      
       console.error(`[mcp-sse] Processing ${request.method} request (id: ${request.id})`);
       
       // Handle request by calling the appropriate handler directly

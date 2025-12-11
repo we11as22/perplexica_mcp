@@ -1,15 +1,50 @@
 services:
+  searxng-1:
+    build:
+      context: .
+      dockerfile: Dockerfile.searxng
+    ports:
+      - '8081:8080'
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  searxng-2:
+    build:
+      context: .
+      dockerfile: Dockerfile.searxng
+    ports:
+      - '8082:8080'
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
   perplexica:
     build:
       context: .
       dockerfile: Dockerfile
     env_file:
       - .env
+    environment:
+      - SEARXNG_API_URL=http://searxng-1:8080,http://searxng-2:8080
     ports:
       - '3000:3000'
     volumes:
       - data:/home/perplexica/data
       - uploads:/home/perplexica/uploads
+    depends_on:
+      searxng-1:
+        condition: service_healthy
+      searxng-2:
+        condition: service_healthy
     restart: unless-stopped
 
   mcp-search:
